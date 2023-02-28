@@ -1,3 +1,6 @@
+import sys
+import traceback
+
 import requests
 from lxml import etree, html
 import json
@@ -220,15 +223,19 @@ class DataFiles():
 
             for out_file, data in zip(self.list, self.data.list):
                 try:
-                    fw = open(out_file, "w")
+                    fw = open(out_file, "w", encoding="utf-8")
                     output_data = json.dumps(data, ensure_ascii = False)
                     fw.write(output_data)
                     fw.close
-                    print("Write complete: " + out_file)
+                    print(f"Write complete: {out_file} data size: {len(output_data)}")
                 except:
                     print("Write failed: " + out_file)
-                    fl = open("log","a+")
-                    fl.write("Write failed: " + out_file)
+                    # fl = open("c2scrape.log","a+")
+                    # fl.write("Write failed: " + out_file + "\n")
+                    with open("exceptions.log", "a+", encoding="utf-8") as logfile:
+                        logfile.write("Exception while writing {!r}\n".format(out_file))
+                        logfile.write("Data: {!r}\n".format(output_data))
+                        traceback.print_exc(file=logfile)
 
             if lock != None:
                 lock.release()
@@ -246,12 +253,15 @@ class DataFiles():
     def init_files(self):
         for path in self.list:
             try:
-                fw = open(path, "w+")
+                fw = open(path, "w+", encoding="utf-8")
                 fw.close
             except:
                 print("Init failed: " + path)
-                fl = open("log","a+")
-                fl.write("Init failed: " + path)
+                # fl = open("exceptions.log","a+", encoding="utf-8")
+                # fl.write("Init failed: " + path)
+                with open("exceptions.log", "a+", encoding="utf-8") as logfile:
+                    logfile.write("Exception while writing {!r}\n".format(path))
+                    traceback.print_exc(file=logfile)
         self.timestamp_last_write = datetime.now().timestamp()
 
 class Cache():
@@ -285,7 +295,7 @@ class CacheFiles():
 
     def load(self, path):
         cache = {}
-        fo = open(path)
+        fo = open(path, encoding="utf-8")
         cache = json.load(fo)
         fo.close
         print(f"Loaded cache file: {path}")
@@ -299,15 +309,19 @@ class CacheFiles():
 
             for out_file, data in zip(self.list, self.cache.list):
                 try:
-                    fw = open(out_file, "w")
+                    fw = open(out_file, "w", encoding="utf-8")
                     output_data = json.dumps(data, ensure_ascii = False)
                     fw.write(output_data)
                     fw.close
                     print("Write complete: " + out_file)
                 except:
                     print("Write failed: " + out_file)
-                    fl = open("log","a+")
-                    fl.write("Write failed: " + out_file)
+                    # fl = open("exceptions.log","a+", encoding="utf-8")
+                    # fl.write("Write failed: " + out_file)
+                    with open("exceptions.log", "a+", encoding="utf-8") as logfile:
+                        logfile.write("Exception while writing {!r}\n".format(out_file))
+                        logfile.write("Data: {!r}\n".format(output_data))
+                        traceback.print_exc(file=logfile)
 
             self.timestamp_last_write = datetime.now().timestamp()
             if lock != None:
@@ -386,22 +400,30 @@ def get_athlete_data(r):
 
     athlete_profile = {}
     content = tree.xpath('//section[@class="content"]')
-    athlete_profile["name"] = content[0].xpath('h2')[0].text
-    athlete_profile_labels = content[0].xpath('p/strong')
-    #store as list
-    athlete_profile_labels = [label.text for label in athlete_profile_labels]
-
-    i = 0
-    #check to see if I need to be logged in
-    if "You must be <a href=\"/login\">logged in</a> to see this user\'s profile" in r.text:
-        athlete_profile["availablity"] = "logged in"
-    elif "<div class=\"stats\">" in r.text:
-        #stat boxes only appear when profile is accessible
-        athlete_profile["availablity"] = "available"
-    elif "This user's profile is only accessible to training partners." in r.text:
-        athlete_profile["availablity"] = "training partner"
-    else:
+    privatecontent = content[0].xpath('p')[0].text
+    if not privatecontent.isspace():
+        print(privatecontent)
+    if privatecontent == "This user's profile is private.":
+        athlete_profile["name"] = "private"
         athlete_profile["availablity"] = "private"
+        athlete_profile_labels = []
+    else:
+        athlete_profile["name"] = content[0].xpath('h2')[0].text
+        athlete_profile_labels = content[0].xpath('p/strong')
+        #store as list
+        athlete_profile_labels = [label.text for label in athlete_profile_labels]
+
+        i = 0
+        #check to see if I need to be logged in
+        if "You must be <a href=\"/login\">logged in</a> to see this user\'s profile" in r.text:
+            athlete_profile["availablity"] = "logged in"
+        elif "<div class=\"stats\">" in r.text:
+            #stat boxes only appear when profile is accessible
+            athlete_profile["availablity"] = "available"
+        elif "This user's profile is only accessible to training partners." in r.text:
+            athlete_profile["availablity"] = "training partner"
+        else:
+            athlete_profile["availablity"] = "private"
 
     #profile values not contained in tags so need to be a bit messy to get them
     for profile_label in athlete_profile_labels:
@@ -480,16 +502,16 @@ def get_athlete(job):
         if profile_id in cache.keys():
             job_data = cache[profile_id]#retrieve from cache
         else:
-            get_url_success = job.get_url() #get the URL
-            if get_url_success:
-                if job.request.status_code == 200: #check that the URL was recieved OK
-                    job_data = get_athlete_data(job.request)
-                    job_data["retrieved"] = strftime("%d-%m-%Y %H:%M:%S", gmtime())
-                    job.lock.acquire()
-                    cache.update({profile_id:job_data}) #cache
-                    job.lock.release()
-                else:
-                    print(f"There was a problem with {job.url}, status code: {job.request.status_code}")
+            # get_url_success = job.get_url() #get the URL
+            job.get_url()
+            if job.request.status_code == 200: #check that the URL was recieved OK
+                job_data = get_athlete_data(job.request)
+                job_data["retrieved"] = strftime("%d-%m-%Y %H:%M:%S", gmtime())
+                job.lock.acquire()
+                cache.update({profile_id:job_data}) #cache
+                job.lock.release()
+            else:
+                print(f"There was a problem with {job.url}, status code: {job.request.status_code}")
 
         if job_data != {}:
             job.lock.acquire() #dict.update is thread safe but other fucntions used elsewhere (e.g. json.dumps) may not, need lock here
@@ -510,16 +532,16 @@ def get_ext_workout(job):
         if workout_id in cache.keys():
             job_data = cache[workout_id]#retrieve from cache
         else:
-            get_url_success = job.get_url() #get the URL
-            if get_url_success: 
-                if job.request.status_code == 200: #check that the URL was recieved OK
-                        job_data = get_ext_workout_data(job.request)
-                        job_data["retrieved"] = strftime("%d-%m-%Y %H:%M:%S", gmtime())
-                        job.lock.acquire() #dict.update is thread safe but other fucntions used elsewhere (e.g. json.dumps) may not, need lock here
-                        cache.update({workout_id:job_data}) #cache
-                        job.lock.release()
-                else:
-                    print(f"There was a problem with {job.url}, status code: {job.request.status_code}")
+            # get_url_success = job.get_url() #get the URL
+            job.get_url()
+            if job.request.status_code == 200: #check that the URL was recieved OK
+                    job_data = get_ext_workout_data(job.request)
+                    job_data["retrieved"] = strftime("%d-%m-%Y %H:%M:%S", gmtime())
+                    job.lock.acquire() #dict.update is thread safe but other fucntions used elsewhere (e.g. json.dumps) may not, need lock here
+                    cache.update({workout_id:job_data}) #cache
+                    job.lock.release()
+            else:
+                print(f"There was a problem with {job.url}, status code: {job.request.status_code}")
 
         if job_data != {}:
             job.lock.acquire() #dict.update is thread safe but other fucntions used elsewhere (e.g. json.dumps) may not, need lock here
